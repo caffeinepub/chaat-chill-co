@@ -1,5 +1,6 @@
 import { motion } from "motion/react";
 import { useEffect, useState } from "react";
+import AdminPage from "./AdminPage";
 import OrderPage from "./OrderPage";
 
 const products = [
@@ -105,6 +106,33 @@ function LandingPage() {
             zIndex: 1,
           }}
         />
+
+        {/* Pani Puri blurred background image */}
+        <div
+          style={{
+            position: "absolute",
+            bottom: "5%",
+            left: "50%",
+            transform: "translateX(-50%)",
+            width: "min(600px, 80vw)",
+            height: "auto",
+            zIndex: 0,
+            pointerEvents: "none",
+          }}
+        >
+          <img
+            src="/assets/generated/pani-puri-hero-bg.dim_900x700.jpg"
+            alt=""
+            style={{
+              width: "100%",
+              height: "auto",
+              borderRadius: 24,
+              filter: "blur(18px) saturate(1.3)",
+              opacity: 0.32,
+              display: "block",
+            }}
+          />
+        </div>
 
         <div
           style={{
@@ -230,20 +258,10 @@ function LandingPage() {
                 lineHeight: 1.15,
                 color: "#F3F1ED",
                 letterSpacing: "-0.01em",
+                textShadow: "0 0 24px rgba(255,255,255,0.18)",
               }}
             >
-              Not Just Food.
-            </div>
-            <div
-              className="headline-gradient"
-              style={{
-                fontSize: "clamp(2rem, 5vw, 3.5rem)",
-                fontWeight: 700,
-                lineHeight: 1.15,
-                letterSpacing: "-0.01em",
-              }}
-            >
-              A Moment.
+              Refreshing Sips &amp; Authentic Bites
             </div>
           </motion.div>
 
@@ -252,13 +270,13 @@ function LandingPage() {
             animate={{ opacity: 1 }}
             transition={{ duration: 0.8, delay: 0.5 }}
             style={{
-              color: "#8A8A8A",
+              color: "#FFD580",
               fontSize: "1.1rem",
               marginBottom: "2.5rem",
               letterSpacing: "0.05em",
             }}
           >
-            Spice. Chill. Repeat.
+            Sip. Snack. Chill.
           </motion.p>
 
           <motion.div
@@ -566,5 +584,6 @@ export default function App() {
   }, []);
 
   if (path === "/order") return <OrderPage />;
+  if (path === "/admin") return <AdminPage />;
   return <LandingPage />;
 }

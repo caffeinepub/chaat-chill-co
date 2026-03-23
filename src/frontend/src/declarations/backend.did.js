@@ -8,10 +8,36 @@
 
 import { IDL } from '@icp-sdk/core/candid';
 
-export const idlService = IDL.Service({});
+export const Item = IDL.Record({ 'itemName' : IDL.Text, 'quantity' : IDL.Nat });
+export const Order = IDL.Record({
+  'customerName' : IDL.Text,
+  'orderId' : IDL.Nat,
+  'timestamp' : IDL.Int,
+  'items' : IDL.Vec(Item),
+  'phoneNumber' : IDL.Text,
+});
+
+export const idlService = IDL.Service({
+  'getAllOrders' : IDL.Func([], [IDL.Vec(Order)], ['query']),
+  'placeOrder' : IDL.Func([IDL.Text, IDL.Text, IDL.Vec(Item)], [IDL.Nat], []),
+});
 
 export const idlInitArgs = [];
 
-export const idlFactory = ({ IDL }) => { return IDL.Service({}); };
+export const idlFactory = ({ IDL }) => {
+  const Item = IDL.Record({ 'itemName' : IDL.Text, 'quantity' : IDL.Nat });
+  const Order = IDL.Record({
+    'customerName' : IDL.Text,
+    'orderId' : IDL.Nat,
+    'timestamp' : IDL.Int,
+    'items' : IDL.Vec(Item),
+    'phoneNumber' : IDL.Text,
+  });
+  
+  return IDL.Service({
+    'getAllOrders' : IDL.Func([], [IDL.Vec(Order)], ['query']),
+    'placeOrder' : IDL.Func([IDL.Text, IDL.Text, IDL.Vec(Item)], [IDL.Nat], []),
+  });
+};
 
 export const init = ({ IDL }) => { return []; };

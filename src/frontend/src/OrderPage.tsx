@@ -1,5 +1,6 @@
 import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
+import { useActor } from "./hooks/useActor";
 
 const ORDER_ITEMS = [
   {
@@ -20,24 +21,143 @@ const ORDER_ITEMS = [
   { id: 4, name: "ICED TEA", emoji: "🍋", price: 35, sub: "per cup" },
 ];
 
+const COMBO_ITEMS: {
+  id: number;
+  name: string;
+  emoji: string;
+  price: number;
+  sub: string;
+  badge: string | null;
+  highlight: boolean;
+  image: string;
+}[] = [
+  {
+    id: 101,
+    name: "Quick Chill Combo",
+    emoji: "🌿",
+    price: 59,
+    sub: "Pani Puri + Iced Tea",
+    badge: null,
+    highlight: false,
+    image: "/assets/generated/combo-quick-chill.dim_300x200.jpg",
+  },
+  {
+    id: 102,
+    name: "Creamy Treat Combo",
+    emoji: "🍮",
+    price: 75,
+    sub: "Dahi Puri + Iced Tea",
+    badge: null,
+    highlight: false,
+    image: "/assets/generated/combo-creamy-treat.dim_300x200.jpg",
+  },
+  {
+    id: 103,
+    name: "Classic Chaat Combo",
+    emoji: "🍽️",
+    price: 69,
+    sub: "Pani Puri + Dahi Puri",
+    badge: null,
+    highlight: false,
+    image: "/assets/generated/combo-classic-chaat.dim_300x200.jpg",
+  },
+  {
+    id: 104,
+    name: "Chill & Thrill Combo",
+    emoji: "❄️",
+    price: 89,
+    sub: "Pani Puri + Cold Coffee",
+    badge: null,
+    highlight: false,
+    image: "/assets/generated/combo-chill-thrill.dim_300x200.jpg",
+  },
+  {
+    id: 105,
+    name: "Premium Indulgence",
+    emoji: "✨",
+    price: 105,
+    sub: "Dahi Puri + Cold Coffee",
+    badge: null,
+    highlight: false,
+    image: "/assets/generated/combo-premium-indulgence.dim_300x200.jpg",
+  },
+  {
+    id: 106,
+    name: "⭐ Full Feast",
+    emoji: "",
+    price: 99,
+    sub: "Pani Puri + Dahi Puri + Iced Tea",
+    badge: "Bestseller",
+    highlight: true,
+    image: "/assets/generated/combo-full-feast.dim_300x200.jpg",
+  },
+  {
+    id: 107,
+    name: "👑 Ultimate Combo",
+    emoji: "",
+    price: 129,
+    sub: "Pani Puri + Dahi Puri + Cold Coffee",
+    badge: "Premium",
+    highlight: false,
+    image: "/assets/generated/combo-ultimate.dim_300x200.jpg",
+  },
+  {
+    id: 108,
+    name: "🧃 Beverage Blast",
+    emoji: "",
+    price: 90,
+    sub: "Cold Coffee + Iced Tea",
+    badge: "New",
+    highlight: true,
+    image: "/assets/generated/combo-beverage-blast.dim_300x200.jpg",
+  },
+];
+
 function goHome() {
   window.history.pushState({}, "", "/");
   window.dispatchEvent(new PopStateEvent("popstate"));
 }
 
+function getBadgeStyle(badge: string | null) {
+  if (badge === "Bestseller")
+    return {
+      background: "rgba(242,193,91,0.2)",
+      color: "#F2C15B",
+      border: "1px solid rgba(242,193,91,0.5)",
+    };
+  if (badge === "Premium")
+    return {
+      background: "rgba(180,120,255,0.15)",
+      color: "#C89BFF",
+      border: "1px solid rgba(180,120,255,0.4)",
+    };
+  if (badge === "New")
+    return {
+      background: "rgba(60,220,140,0.15)",
+      color: "#3DDB8C",
+      border: "1px solid rgba(60,220,140,0.4)",
+    };
+  return {};
+}
+
 export default function OrderPage() {
+  const { actor } = useActor();
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const total = ORDER_ITEMS.reduce(
+  const allItems = [...ORDER_ITEMS, ...COMBO_ITEMS];
+
+  const total = allItems.reduce(
     (sum, item) => sum + (quantities[item.id] ?? 0) * item.price,
     0,
   );
   const itemCount = Object.values(quantities).reduce((a, b) => a + b, 0);
-
-  const canSubmit = itemCount > 0 && name.trim() !== "" && phone.trim() !== "";
+  const canSubmit =
+    itemCount > 0 && name.trim() !== "" && phone.trim() !== "" && !loading;
 
   function adjust(id: number, delta: number) {
     setQuantities((prev) => {
@@ -49,6 +169,26 @@ export default function OrderPage() {
       }
       return { ...prev, [id]: next };
     });
+  }
+
+  async function handleConfirm() {
+    if (!canSubmit || !actor) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const items = allItems
+        .filter((item) => (quantities[item.id] ?? 0) > 0)
+        .map((item) => ({
+          itemName: item.name,
+          quantity: BigInt(quantities[item.id]),
+        }));
+      await actor.placeOrder(name.trim(), phone.trim(), items);
+      setConfirmed(true);
+    } catch {
+      setError("Something went wrong. Please try again.");
+    } finally {
+      setLoading(false);
+    }
   }
 
   if (confirmed) {
@@ -147,7 +287,24 @@ export default function OrderPage() {
         color: "#F3F1ED",
       }}
     >
-      {/* Back button */}
+      <style>{`
+        .combo-img {
+          width: 80px;
+          height: 60px;
+          border-radius: 10px;
+          object-fit: cover;
+          flex-shrink: 0;
+          margin-right: 0.85rem;
+          box-shadow: 0 0 12px rgba(0,0,0,0.5);
+          border: 1px solid rgba(226,154,58,0.2);
+        }
+        @media (max-width: 480px) {
+          .combo-img {
+            width: 60px;
+            height: 48px;
+          }
+        }
+      `}</style>
       <button
         type="button"
         onClick={goHome}
@@ -181,7 +338,6 @@ export default function OrderPage() {
           padding: "5rem 1.25rem 8rem",
         }}
       >
-        {/* Header */}
         <motion.div
           initial={{ opacity: 0, y: -20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -211,7 +367,7 @@ export default function OrderPage() {
           </p>
         </motion.div>
 
-        {/* Item selection */}
+        {/* ── Individual Items ── */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -357,7 +513,210 @@ export default function OrderPage() {
           </div>
         </motion.div>
 
-        {/* Order summary bar */}
+        {/* ── Combo Deals Section ── */}
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, delay: 0.25 }}
+          style={{ marginTop: "2.5rem" }}
+        >
+          <div style={{ marginBottom: "1rem" }}>
+            <h2
+              style={{
+                fontSize: "1.1rem",
+                fontWeight: 700,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                color: "#F3F1ED",
+                marginBottom: "0.25rem",
+              }}
+            >
+              🔥 Combo Deals
+            </h2>
+            <p style={{ color: "#6B6460", fontSize: "0.82rem", margin: 0 }}>
+              Best value picks – save more, enjoy more
+            </p>
+          </div>
+
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}
+            data-ocid="order.combo_list"
+          >
+            {COMBO_ITEMS.map((combo, i) => {
+              const qty = quantities[combo.id] ?? 0;
+              const selected = qty > 0;
+              const badgeStyle = getBadgeStyle(combo.badge);
+              const isHighlighted = combo.highlight;
+
+              return (
+                <motion.div
+                  key={combo.id}
+                  initial={{ opacity: 0, x: -20 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.4, delay: 0.05 * i }}
+                  data-ocid={`order.combo.${i + 1}`}
+                  style={{
+                    background: isHighlighted
+                      ? "linear-gradient(135deg, #1e1810 0%, #201a0e 100%)"
+                      : "#1a1510",
+                    border: `1px solid ${
+                      selected
+                        ? "rgba(242,193,91,0.75)"
+                        : isHighlighted
+                          ? "rgba(242,193,91,0.4)"
+                          : "rgba(226,154,58,0.25)"
+                    }`,
+                    borderRadius: 16,
+                    padding: "1rem 1.25rem",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    transition: "border-color 0.25s ease",
+                    boxShadow: selected
+                      ? "0 0 24px rgba(242,193,91,0.18)"
+                      : isHighlighted
+                        ? "0 0 16px rgba(242,193,91,0.08)"
+                        : "none",
+                    position: "relative",
+                    overflow: "hidden",
+                  }}
+                >
+                  {/* Combo image on the LEFT */}
+                  <img
+                    src={combo.image}
+                    alt={combo.name}
+                    className="combo-img"
+                  />
+
+                  {/* Text info in the MIDDLE */}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "0.5rem",
+                        flexWrap: "wrap",
+                        marginBottom: "0.15rem",
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontWeight: 700,
+                          fontSize: "0.95rem",
+                          letterSpacing: "0.03em",
+                          color: "#F3F1ED",
+                        }}
+                      >
+                        {combo.name}
+                        {combo.emoji ? ` ${combo.emoji}` : ""}
+                      </span>
+                      {combo.badge && (
+                        <span
+                          style={{
+                            fontSize: "0.65rem",
+                            fontWeight: 700,
+                            letterSpacing: "0.06em",
+                            textTransform: "uppercase",
+                            padding: "2px 8px",
+                            borderRadius: 20,
+                            ...badgeStyle,
+                          }}
+                        >
+                          {combo.badge}
+                        </span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: "0.5rem",
+                        marginTop: "0.1rem",
+                      }}
+                    >
+                      <span
+                        className="price-gradient"
+                        style={{ fontSize: "1.2rem" }}
+                      >
+                        ₹{combo.price}
+                      </span>
+                      <span style={{ color: "#6B6460", fontSize: "0.75rem" }}>
+                        {combo.sub}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Quantity controls on the RIGHT */}
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      flexShrink: 0,
+                      marginLeft: "0.75rem",
+                    }}
+                  >
+                    <button
+                      type="button"
+                      onClick={() => adjust(combo.id, -1)}
+                      disabled={qty === 0}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: "50%",
+                        border: "1px solid rgba(226,154,58,0.5)",
+                        background:
+                          qty > 0 ? "rgba(226,154,58,0.2)" : "transparent",
+                        color: "#E29A3A",
+                        fontSize: "1.1rem",
+                        cursor: qty > 0 ? "pointer" : "not-allowed",
+                        opacity: qty > 0 ? 1 : 0.35,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      −
+                    </button>
+                    <span
+                      style={{
+                        minWidth: 20,
+                        textAlign: "center",
+                        fontWeight: 700,
+                        color: qty > 0 ? "#F2C15B" : "#6B6460",
+                        fontSize: "1rem",
+                      }}
+                    >
+                      {qty}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => adjust(combo.id, 1)}
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderRadius: "50%",
+                        border: "1px solid rgba(226,154,58,0.6)",
+                        background: "rgba(226,154,58,0.2)",
+                        color: "#E29A3A",
+                        fontSize: "1.1rem",
+                        cursor: "pointer",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        transition: "all 0.2s",
+                      }}
+                    >
+                      +
+                    </button>
+                  </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        </motion.div>
+
         <AnimatePresence>
           {itemCount > 0 && (
             <motion.div
@@ -393,7 +752,6 @@ export default function OrderPage() {
           )}
         </AnimatePresence>
 
-        {/* Details form */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -466,7 +824,29 @@ export default function OrderPage() {
           </div>
         </motion.div>
 
-        {/* Submit */}
+        <AnimatePresence>
+          {error && (
+            <motion.div
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 8 }}
+              data-ocid="order.error_state"
+              style={{
+                marginTop: "1rem",
+                background: "rgba(220,60,60,0.12)",
+                border: "1px solid rgba(220,60,60,0.4)",
+                borderRadius: 10,
+                padding: "0.75rem 1.1rem",
+                color: "#E88",
+                fontSize: "0.88rem",
+                textAlign: "center",
+              }}
+            >
+              {error}
+            </motion.div>
+          )}
+        </AnimatePresence>
+
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -477,18 +857,38 @@ export default function OrderPage() {
             type="button"
             className="cta-button"
             disabled={!canSubmit}
-            onClick={() => setConfirmed(true)}
+            onClick={handleConfirm}
             data-ocid="order.submit_button"
             style={{
               opacity: canSubmit ? 1 : 0.4,
               cursor: canSubmit ? "pointer" : "not-allowed",
               fontSize: "1rem",
               padding: "14px 32px",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "0.5rem",
             }}
           >
-            🔥 Confirm Pre-Order · ₹{total || "0"}
+            {loading ? (
+              <>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 16,
+                    height: 16,
+                    border: "2px solid rgba(255,255,255,0.3)",
+                    borderTopColor: "#fff",
+                    borderRadius: "50%",
+                    animation: "spin 0.7s linear infinite",
+                  }}
+                />
+                Placing Order...
+              </>
+            ) : (
+              <>🔥 Confirm Pre-Order · ₹{total || "0"}</>
+            )}
           </button>
-          {!canSubmit && (
+          {!canSubmit && !loading && (
             <p
               style={{
                 color: "#6B6460",

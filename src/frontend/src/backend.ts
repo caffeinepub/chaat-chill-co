@@ -89,10 +89,51 @@ export class ExternalBlob {
         return this;
     }
 }
+export interface Order {
+    customerName: string;
+    orderId: bigint;
+    timestamp: bigint;
+    items: Array<Item>;
+    phoneNumber: string;
+}
+export interface Item {
+    itemName: string;
+    quantity: bigint;
+}
 export interface backendInterface {
+    getAllOrders(): Promise<Array<Order>>;
+    placeOrder(customerName: string, phoneNumber: string, items: Array<Item>): Promise<bigint>;
 }
 export class Backend implements backendInterface {
     constructor(private actor: ActorSubclass<_SERVICE>, private _uploadFile: (file: ExternalBlob) => Promise<Uint8Array>, private _downloadFile: (file: Uint8Array) => Promise<ExternalBlob>, private processError?: (error: unknown) => never){}
+    async getAllOrders(): Promise<Array<Order>> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.getAllOrders();
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.getAllOrders();
+            return result;
+        }
+    }
+    async placeOrder(arg0: string, arg1: string, arg2: Array<Item>): Promise<bigint> {
+        if (this.processError) {
+            try {
+                const result = await this.actor.placeOrder(arg0, arg1, arg2);
+                return result;
+            } catch (e) {
+                this.processError(e);
+                throw new Error("unreachable");
+            }
+        } else {
+            const result = await this.actor.placeOrder(arg0, arg1, arg2);
+            return result;
+        }
+    }
 }
 export interface CreateActorOptions {
     agent?: Agent;
