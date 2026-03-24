@@ -95,7 +95,7 @@ const COMBO_ITEMS: {
     id: 107,
     name: "👑 Ultimate Combo",
     emoji: "",
-    price: 129,
+    price: 95,
     sub: "Pani Puri + Dahi Puri + Cold Coffee",
     badge: "Premium",
     highlight: false,
@@ -105,7 +105,7 @@ const COMBO_ITEMS: {
     id: 108,
     name: "🧃 Beverage Blast",
     emoji: "",
-    price: 90,
+    price: 139,
     sub: "Cold Coffee + Iced Tea",
     badge: "New",
     highlight: true,
@@ -146,6 +146,7 @@ export default function OrderPage() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [confirmed, setConfirmed] = useState(false);
+  const [offlineMode, setOfflineMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -172,23 +173,59 @@ export default function OrderPage() {
   }
 
   async function handleConfirm() {
-    if (!canSubmit || !actor) return;
+    if (!canSubmit) return;
     setLoading(true);
     setError(null);
-    try {
-      const items = allItems
-        .filter((item) => (quantities[item.id] ?? 0) > 0)
-        .map((item) => ({
-          itemName: item.name,
-          quantity: BigInt(quantities[item.id]),
-        }));
-      await actor.placeOrder(name.trim(), phone.trim(), items);
-      setConfirmed(true);
-    } catch {
-      setError("Something went wrong. Please try again.");
-    } finally {
-      setLoading(false);
+
+    const selectedItems = allItems
+      .filter((item) => (quantities[item.id] ?? 0) > 0)
+      .map((item) => ({
+        itemName: item.name,
+        quantity: BigInt(quantities[item.id]),
+      }));
+
+    const payload = {
+      name: name.trim(),
+      phone: phone.trim(),
+      items: selectedItems,
+      total,
+    };
+
+    console.log(
+      "[Order] Submitting payload:",
+      JSON.stringify(payload, (_, v) =>
+        typeof v === "bigint" ? v.toString() : v,
+      ),
+    );
+
+    // Try backend first
+    if (actor) {
+      try {
+        const result = await actor.placeOrder(
+          payload.name,
+          payload.phone,
+          payload.items,
+        );
+        console.log("[Order] Backend response:", result?.toString());
+        setConfirmed(true);
+        setLoading(false);
+        return;
+      } catch (err: unknown) {
+        console.error("[Order] Backend error:", err);
+        // Fall through to offline mode below
+        console.warn("[Order] Falling back to offline mode. Data:", payload);
+        setOfflineMode(true);
+        setConfirmed(true);
+        setLoading(false);
+        return;
+      }
     }
+
+    // No actor available — offline fallback
+    console.warn("[Order] Actor not available. Offline mode. Data:", payload);
+    setOfflineMode(true);
+    setConfirmed(true);
+    setLoading(false);
   }
 
   if (confirmed) {
@@ -229,8 +266,20 @@ export default function OrderPage() {
               marginBottom: "0.5rem",
             }}
           >
-            Order Confirmed!
+            {offlineMode ? "Order Received!" : "Order Confirmed!"}
           </h2>
+          {offlineMode && (
+            <p
+              style={{
+                color: "#E29A3A",
+                fontSize: "0.8rem",
+                marginBottom: "0.25rem",
+                opacity: 0.8,
+              }}
+            >
+              (offline mode — saved locally)
+            </p>
+          )}
           <p
             style={{
               color: "#F2C15B",

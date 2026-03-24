@@ -7,6 +7,14 @@ const PRICES: Record<string, number> = {
   "DAHI PURI": 50,
   "COLD COFFEE": 70,
   "ICED TEA": 35,
+  "Quick Chill Combo": 59,
+  "Creamy Treat Combo": 75,
+  "Classic Chaat Combo": 69,
+  "Chill & Thrill Combo": 89,
+  "Premium Indulgence": 105,
+  "⭐ Full Feast": 99,
+  "👑 Ultimate Combo": 95,
+  "🧃 Beverage Blast": 139,
 };
 
 interface Order {
