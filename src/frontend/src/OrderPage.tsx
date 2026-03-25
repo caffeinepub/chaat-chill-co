@@ -143,17 +143,59 @@ function getBadgeStyle(badge: string | null) {
   return {};
 }
 
+function formatDate(date: Date): string {
+  const months = [
+    "Jan",
+    "Feb",
+    "Mar",
+    "Apr",
+    "May",
+    "Jun",
+    "Jul",
+    "Aug",
+    "Sep",
+    "Oct",
+    "Nov",
+    "Dec",
+  ];
+  const dd = String(date.getDate()).padStart(2, "0");
+  const mmm = months[date.getMonth()];
+  const yyyy = date.getFullYear();
+  let hours = date.getHours();
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  const ampm = hours >= 12 ? "PM" : "AM";
+  hours = hours % 12 || 12;
+  return `${dd} ${mmm} ${yyyy}, ${hours}:${minutes} ${ampm}`;
+}
+
+const divider = (
+  <div
+    style={{
+      height: 1,
+      background: "rgba(226,154,58,0.25)",
+      margin: "1.25rem 0",
+    }}
+  />
+);
+
 export default function OrderPage() {
   const { actor } = useActor();
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [step, setStep] = useState<"form" | "payment" | "done">("form");
-  const [offlineMode, setOfflineMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [orderTotal, setOrderTotal] = useState(0);
   const [orderName, setOrderName] = useState("");
+  const [orderPhone, setOrderPhone] = useState("");
+  const [orderItems, setOrderItems] = useState<{ name: string; qty: number }[]>(
+    [],
+  );
+  const [confirmedAt, setConfirmedAt] = useState<Date | null>(null);
+  const [savedTransactionId, setSavedTransactionId] = useState("");
+  const [transactionId, setTransactionId] = useState("");
+  const [txError, setTxError] = useState<string | null>(null);
 
   const allItems = [...ORDER_ITEMS, ...COMBO_ITEMS];
 
@@ -162,8 +204,7 @@ export default function OrderPage() {
     0,
   );
   const itemCount = Object.values(quantities).reduce((a, b) => a + b, 0);
-  const canSubmit =
-    itemCount > 0 && name.trim() !== "" && phone.trim() !== "" && !loading;
+  const canProceed = itemCount > 0 && name.trim() !== "" && phone.trim() !== "";
 
   function adjust(id: number, delta: number) {
     setQuantities((prev) => {
@@ -177,10 +218,25 @@ export default function OrderPage() {
     });
   }
 
-  async function handleConfirm() {
-    if (!canSubmit) return;
-    setLoading(true);
+  function handleProceedToPayment() {
+    if (!canProceed) return;
     setError(null);
+    setOrderTotal(total);
+    setOrderName(name.trim());
+    setStep("payment");
+  }
+
+  async function handleConfirmPayment() {
+    if (transactionId.trim().length < 8) {
+      setTxError(
+        transactionId.trim() === ""
+          ? "Please enter your UPI Transaction ID"
+          : "Transaction ID must be at least 8 characters",
+      );
+      return;
+    }
+    setTxError(null);
+    setLoading(true);
 
     const selectedItems = allItems
       .filter((item) => (quantities[item.id] ?? 0) > 0)
@@ -189,15 +245,19 @@ export default function OrderPage() {
         quantity: BigInt(quantities[item.id]),
       }));
 
+    const orderItemsSummary = allItems
+      .filter((item) => (quantities[item.id] ?? 0) > 0)
+      .map((item) => ({ name: item.name, qty: quantities[item.id] }));
+
     const payload = {
       name: name.trim(),
       phone: phone.trim(),
       items: selectedItems,
-      total,
+      total: orderTotal,
     };
 
     console.log(
-      "[Order] Submitting payload:",
+      "[Order] Saving order after payment confirmation:",
       JSON.stringify(payload, (_, v) =>
         typeof v === "bigint" ? v.toString() : v,
       ),
@@ -205,35 +265,179 @@ export default function OrderPage() {
 
     if (actor) {
       try {
-        const result = await actor.placeOrder(
-          payload.name,
-          payload.phone,
-          payload.items,
-        );
-        console.log("[Order] Backend response:", result?.toString());
-        setOrderTotal(total);
-        setOrderName(name.trim());
-        setStep("payment");
-        setLoading(false);
-        return;
-      } catch (err: unknown) {
-        console.error("[Order] Backend error:", err);
-        console.warn("[Order] Falling back to offline mode. Data:", payload);
-        setOfflineMode(true);
-        setOrderTotal(total);
-        setOrderName(name.trim());
-        setStep("payment");
-        setLoading(false);
-        return;
+        await actor.placeOrder(payload.name, payload.phone, payload.items);
+      } catch (err) {
+        console.warn("[Order] Backend error (offline mode):", err);
       }
+    } else {
+      console.warn("[Order] Actor unavailable. Offline mode. Data:", payload);
     }
 
-    console.warn("[Order] Actor not available. Offline mode. Data:", payload);
-    setOfflineMode(true);
-    setOrderTotal(total);
-    setOrderName(name.trim());
-    setStep("payment");
+    setOrderItems(orderItemsSummary);
+    setOrderPhone(phone.trim());
+    setSavedTransactionId(transactionId.trim());
+    setConfirmedAt(new Date());
     setLoading(false);
+    setStep("done");
+  }
+
+  function downloadReceipt() {
+    const W = 480;
+    const PADDING = 36;
+    const LINE_H = 28;
+    const SECTION_GAP = 18;
+
+    // Pre-calculate height
+    const headerLines = 4; // brand title + divider + spacing
+    const detailRows = 4; // name, phone, txid, datetime
+    const itemRows = orderItems.length;
+    const footerLines = 3;
+    const estimatedHeight =
+      120 + // top padding + header
+      headerLines * LINE_H +
+      SECTION_GAP * 2 +
+      detailRows * LINE_H +
+      SECTION_GAP +
+      24 + // items heading
+      itemRows * LINE_H +
+      SECTION_GAP +
+      LINE_H * 2 + // total
+      SECTION_GAP +
+      footerLines * LINE_H +
+      60; // bottom padding
+
+    const canvas = document.createElement("canvas");
+    canvas.width = W * 2; // retina
+    canvas.height = estimatedHeight * 2;
+    canvas.style.width = `${W}px`;
+    canvas.style.height = `${estimatedHeight}px`;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    ctx.scale(2, 2);
+
+    // White background
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, W, estimatedHeight);
+
+    let y = 44;
+
+    // Brand title
+    ctx.fillStyle = "#1a1108";
+    ctx.font = "bold 22px 'Arial', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("CHAAT & CHILL CO.", W / 2, y);
+    y += 10;
+
+    // Orange divider
+    ctx.strokeStyle = "#E29A3A";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(PADDING, y);
+    ctx.lineTo(W - PADDING, y);
+    ctx.stroke();
+    y += 20;
+
+    // Helper: draw a label-value row
+    function drawRow(label: string, value: string) {
+      ctx!.font = "600 12px 'Arial', sans-serif";
+      ctx!.textAlign = "left";
+      ctx!.fillStyle = "#888888";
+      ctx!.fillText(label, PADDING, y);
+
+      ctx!.font = "600 13px 'Arial', sans-serif";
+      ctx!.textAlign = "right";
+      ctx!.fillStyle = "#1a1108";
+      ctx!.fillText(value, W - PADDING, y);
+      y += LINE_H;
+    }
+
+    drawRow("Name", orderName);
+    drawRow("Phone", orderPhone);
+    drawRow("Transaction ID", savedTransactionId);
+    drawRow("Date & Time", confirmedAt ? formatDate(confirmedAt) : "-");
+
+    y += 4;
+    // Thin divider
+    ctx.strokeStyle = "#E8E0D4";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PADDING, y);
+    ctx.lineTo(W - PADDING, y);
+    ctx.stroke();
+    y += SECTION_GAP;
+
+    // Items heading
+    ctx.font = "bold 11px 'Arial', sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#888888";
+    ctx.fillText("ITEMS ORDERED", PADDING, y);
+    y += LINE_H;
+
+    // Items list
+    for (const item of orderItems) {
+      ctx.font = "500 13px 'Arial', sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillStyle = "#333333";
+      ctx.fillText(`• ${item.name}`, PADDING + 4, y);
+
+      ctx.textAlign = "right";
+      ctx.fillStyle = "#555555";
+      ctx.fillText(`× ${item.qty}`, W - PADDING, y);
+      y += LINE_H;
+    }
+
+    y += 4;
+    // Divider before total
+    ctx.strokeStyle = "#E8E0D4";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(PADDING, y);
+    ctx.lineTo(W - PADDING, y);
+    ctx.stroke();
+    y += SECTION_GAP;
+
+    // Total
+    ctx.font = "bold 13px 'Arial', sans-serif";
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#888888";
+    ctx.fillText("TOTAL AMOUNT", PADDING, y);
+
+    ctx.font = "bold 20px 'Arial', sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillStyle = "#E29A3A";
+    ctx.fillText(`\u20B9${orderTotal}`, W - PADDING, y);
+    y += LINE_H + 8;
+
+    // Orange divider
+    ctx.strokeStyle = "#E29A3A";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(PADDING, y);
+    ctx.lineTo(W - PADDING, y);
+    ctx.stroke();
+    y += SECTION_GAP;
+
+    // Footer
+    ctx.font = "600 12px 'Arial', sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillStyle = "#888888";
+    ctx.fillText("Thank you for your order!", W / 2, y);
+    y += LINE_H;
+    ctx.font = "500 11px 'Arial', sans-serif";
+    ctx.fillStyle = "#AAAAAA";
+    ctx.fillText(
+      "Show this receipt at the stall to collect your order.",
+      W / 2,
+      y,
+    );
+
+    // Trigger download
+    const link = document.createElement("a");
+    link.download = `chaat-chill-receipt-${Date.now()}.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
   }
 
   // ── Payment Screen ──
@@ -253,13 +457,13 @@ export default function OrderPage() {
         <motion.div
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
+          transition={{ duration: 0.5, ease: "easeOut" }}
           style={{
             background: "#1a1510",
             border: "1px solid rgba(242,193,91,0.35)",
             borderRadius: 24,
             padding: "2.5rem 2rem",
-            maxWidth: 420,
+            maxWidth: 440,
             width: "100%",
             textAlign: "center",
             boxShadow: "0 0 60px rgba(242,193,91,0.12)",
@@ -283,7 +487,7 @@ export default function OrderPage() {
               marginBottom: "1.5rem",
             }}
           >
-            Scan the QR code below to confirm your order
+            Scan QR and complete payment
           </p>
 
           {/* Amount */}
@@ -299,7 +503,7 @@ export default function OrderPage() {
           >
             <span
               style={{
-                fontSize: "1.6rem",
+                fontSize: "1.7rem",
                 fontWeight: 900,
                 background: "linear-gradient(90deg, #E29A3A, #F2C15B)",
                 WebkitBackgroundClip: "text",
@@ -345,7 +549,7 @@ export default function OrderPage() {
               marginBottom: "1.75rem",
               display: "flex",
               flexDirection: "column",
-              gap: "0.5rem",
+              gap: "0.4rem",
             }}
           >
             <p
@@ -356,50 +560,137 @@ export default function OrderPage() {
                 fontWeight: 600,
               }}
             >
-              Pay using any UPI app (GPay, PhonePe, Paytm)
+              Scan QR and complete payment
             </p>
             <p style={{ color: "#B9B3AA", fontSize: "0.82rem", margin: 0 }}>
-              Orders will be confirmed only after payment
-            </p>
-            <p style={{ color: "#B9B3AA", fontSize: "0.82rem", margin: 0 }}>
-              Show payment screenshot at the stall
+              After payment, enter your transaction ID below
             </p>
           </div>
 
-          {/* I've Paid button */}
-          {step === "payment" && (
-            <button
-              type="button"
-              className="cta-button"
-              onClick={() => setStep("done")}
+          {/* Transaction ID Input */}
+          <div style={{ marginBottom: "1.25rem", textAlign: "left" }}>
+            <label
+              htmlFor="txid"
               style={{
-                fontSize: "1rem",
-                padding: "14px 32px",
+                display: "block",
+                color: "#F2C15B",
+                fontSize: "0.85rem",
+                fontWeight: 600,
+                marginBottom: "0.5rem",
+                letterSpacing: "0.04em",
+              }}
+            >
+              Enter UPI Transaction ID
+            </label>
+            <input
+              type="text"
+              id="txid"
+              placeholder="e.g. 123456789012"
+              value={transactionId}
+              onChange={(e) => {
+                setTransactionId(e.target.value);
+                setTxError(null);
+              }}
+              style={{
                 width: "100%",
+                background: "#120f0a",
+                border: `1px solid ${txError ? "rgba(220,60,60,0.6)" : "rgba(226,154,58,0.35)"}`,
+                borderRadius: 12,
+                padding: "0.85rem 1.1rem",
+                color: "#F3F1ED",
+                fontSize: "0.95rem",
+                fontFamily: "'Poppins', sans-serif",
+                outline: "none",
+                boxSizing: "border-box",
+                transition: "border-color 0.2s",
               }}
-            >
-              ✅ I've Paid
-            </button>
-          )}
+              onFocus={(e) => {
+                e.target.style.borderColor = "rgba(242,193,91,0.7)";
+              }}
+              onBlur={(e) => {
+                e.target.style.borderColor = txError
+                  ? "rgba(220,60,60,0.6)"
+                  : "rgba(226,154,58,0.35)";
+              }}
+            />
+            <AnimatePresence>
+              {txError && (
+                <motion.p
+                  initial={{ opacity: 0, y: -4 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0 }}
+                  style={{
+                    color: "#E88",
+                    fontSize: "0.8rem",
+                    marginTop: "0.4rem",
+                    margin: "0.4rem 0 0",
+                  }}
+                >
+                  {txError}
+                </motion.p>
+              )}
+            </AnimatePresence>
+          </div>
 
-          {offlineMode && (
-            <p
-              style={{
-                color: "#E29A3A",
-                fontSize: "0.75rem",
-                marginTop: "0.75rem",
-                opacity: 0.7,
-              }}
-            >
-              (offline mode — saved locally)
-            </p>
-          )}
+          {/* Confirm Payment & Place Order */}
+          <button
+            type="button"
+            className="cta-button"
+            onClick={handleConfirmPayment}
+            disabled={loading}
+            style={{
+              fontSize: "1rem",
+              padding: "14px 32px",
+              width: "100%",
+              opacity: loading ? 0.6 : 1,
+              cursor: loading ? "not-allowed" : "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "0.5rem",
+            }}
+          >
+            {loading ? (
+              <>
+                <span
+                  style={{
+                    display: "inline-block",
+                    width: 16,
+                    height: 16,
+                    border: "2px solid rgba(255,255,255,0.3)",
+                    borderTopColor: "#fff",
+                    borderRadius: "50%",
+                    animation: "spin 0.7s linear infinite",
+                  }}
+                />
+                Saving Order...
+              </>
+            ) : (
+              <>✅ Confirm Payment &amp; Place Order</>
+            )}
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setStep("form")}
+            style={{
+              marginTop: "1rem",
+              background: "transparent",
+              border: "none",
+              color: "#6B6460",
+              fontSize: "0.82rem",
+              cursor: "pointer",
+              textDecoration: "underline",
+            }}
+          >
+            ← Go back and edit order
+          </button>
         </motion.div>
       </div>
     );
   }
 
-  // ── Done / Confirmed Screen ──
+  // ── Receipt / Done Screen ──
   if (step === "done") {
     return (
       <div
@@ -410,85 +701,283 @@ export default function OrderPage() {
           alignItems: "center",
           justifyContent: "center",
           fontFamily: "'Poppins', sans-serif",
-          padding: "2rem",
+          padding: "2rem 1.25rem",
         }}
       >
         <motion.div
-          initial={{ opacity: 0, scale: 0.85 }}
+          initial={{ opacity: 0, scale: 0.9 }}
           animate={{ opacity: 1, scale: 1 }}
-          transition={{ duration: 0.6, ease: "easeOut" }}
+          transition={{ duration: 0.55, ease: "easeOut" }}
+          data-ocid="order.success_state"
           style={{
             background: "#1a1510",
             border: "1px solid rgba(242,193,91,0.4)",
             borderRadius: 24,
-            padding: "3rem 2.5rem",
+            padding: "2.5rem 2rem",
             maxWidth: 480,
             width: "100%",
-            textAlign: "center",
             boxShadow: "0 0 60px rgba(242,193,91,0.2)",
           }}
-          data-ocid="order.success_state"
         >
-          <div style={{ fontSize: "4rem", marginBottom: "1rem" }}>🎉</div>
-          <h2
-            style={{
-              fontSize: "2rem",
-              fontWeight: 900,
-              color: "#F3F1ED",
-              marginBottom: "0.5rem",
-            }}
+          {/* Header */}
+          <div style={{ textAlign: "center", marginBottom: "1.25rem" }}>
+            <div style={{ fontSize: "3rem", marginBottom: "0.6rem" }}>🎉</div>
+            <h2
+              style={{
+                fontSize: "1.6rem",
+                fontWeight: 900,
+                color: "#F3F1ED",
+                margin: "0 0 0.5rem",
+                letterSpacing: "0.02em",
+              }}
+            >
+              Order Confirmed 🎉
+            </h2>
+            <p
+              style={{
+                color: "#B9B3AA",
+                fontSize: "0.88rem",
+                margin: 0,
+                lineHeight: 1.5,
+              }}
+            >
+              Show this receipt at the stall to collect your order
+            </p>
+          </div>
+
+          {divider}
+
+          {/* Receipt Details */}
+          <div
+            style={{ display: "flex", flexDirection: "column", gap: "0.75rem" }}
           >
-            Payment noted! Your order is confirmed 🎉
-          </h2>
-          <p
-            style={{
-              color: "#F2C15B",
-              fontSize: "1.1rem",
-              marginBottom: "0.5rem",
-            }}
-          >
-            Hey {orderName}!
-          </p>
-          <p
-            style={{
-              color: "#B9B3AA",
-              fontSize: "0.95rem",
-              marginBottom: "1.5rem",
-            }}
-          >
-            Your pre-order of{" "}
-            <span style={{ color: "#F2C15B", fontWeight: 700 }}>
-              ₹{orderTotal}
-            </span>{" "}
-            is locked in. See you at the stall!
-          </p>
+            {(
+              [
+                ["Name", orderName],
+                ["Phone", orderPhone],
+              ] as [string, string][]
+            ).map(([label, value]) => (
+              <div
+                key={label}
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: "1rem",
+                }}
+              >
+                <span
+                  style={{
+                    color: "#6B6460",
+                    fontSize: "0.85rem",
+                    flexShrink: 0,
+                  }}
+                >
+                  {label}
+                </span>
+                <span
+                  style={{
+                    color: "#F3F1ED",
+                    fontSize: "0.9rem",
+                    fontWeight: 600,
+                    textAlign: "right",
+                  }}
+                >
+                  {value}
+                </span>
+              </div>
+            ))}
+
+            {/* Transaction ID */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "1rem",
+              }}
+            >
+              <span
+                style={{ color: "#6B6460", fontSize: "0.85rem", flexShrink: 0 }}
+              >
+                Transaction ID
+              </span>
+              <span
+                style={{
+                  color: "#F2C15B",
+                  fontFamily: "monospace",
+                  fontSize: "0.85rem",
+                  textAlign: "right",
+                  wordBreak: "break-all",
+                }}
+              >
+                {savedTransactionId}
+              </span>
+            </div>
+
+            {/* Date & Time */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                alignItems: "center",
+                gap: "1rem",
+              }}
+            >
+              <span
+                style={{ color: "#6B6460", fontSize: "0.85rem", flexShrink: 0 }}
+              >
+                Date &amp; Time
+              </span>
+              <span
+                style={{
+                  color: "#F3F1ED",
+                  fontSize: "0.85rem",
+                  fontWeight: 500,
+                  textAlign: "right",
+                }}
+              >
+                {confirmedAt ? formatDate(confirmedAt) : "—"}
+              </span>
+            </div>
+          </div>
+
+          {divider}
+
+          {/* Items Ordered */}
+          <div>
+            <p
+              style={{
+                color: "#6B6460",
+                fontSize: "0.8rem",
+                textTransform: "uppercase",
+                letterSpacing: "0.07em",
+                margin: "0 0 0.6rem",
+                fontWeight: 600,
+              }}
+            >
+              Items Ordered
+            </p>
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                gap: "0.35rem",
+              }}
+            >
+              {orderItems.map((item, i) => (
+                <div
+                  key={`${item.name}-${i}`}
+                  style={{
+                    color: "#B9B3AA",
+                    fontSize: "0.88rem",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.4rem",
+                  }}
+                >
+                  <span style={{ color: "#E29A3A", fontSize: "0.75rem" }}>
+                    •
+                  </span>
+                  {item.name} × {item.qty}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {divider}
+
+          {/* Total */}
           <div
             style={{
-              background: "rgba(226,154,58,0.1)",
-              border: "1px solid rgba(226,154,58,0.3)",
-              borderRadius: 12,
-              padding: "0.9rem 1.5rem",
-              marginBottom: "2rem",
-              color: "#E29A3A",
-              fontSize: "0.9rem",
-              fontWeight: 600,
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
             }}
           >
-            📸 Show payment screenshot at the stall
+            <span
+              style={{
+                color: "#6B6460",
+                fontSize: "0.9rem",
+                fontWeight: 600,
+                textTransform: "uppercase",
+                letterSpacing: "0.06em",
+              }}
+            >
+              Total Amount
+            </span>
+            <span
+              style={{
+                fontSize: "1.5rem",
+                fontWeight: 900,
+                background: "linear-gradient(90deg, #E29A3A, #F2C15B)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+              }}
+            >
+              ₹{orderTotal}
+            </span>
           </div>
-          <button
-            type="button"
-            className="cta-button"
-            onClick={goHome}
-            data-ocid="order.secondary_button"
+
+          <div
+            style={{
+              marginTop: "1.75rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.75rem",
+            }}
           >
-            ← Back to Home
-          </button>
+            {/* Download Receipt Button */}
+            <button
+              type="button"
+              onClick={downloadReceipt}
+              data-ocid="order.secondary_button"
+              style={{
+                width: "100%",
+                fontSize: "1rem",
+                fontWeight: 700,
+                padding: "14px 32px",
+                background: "rgba(242,193,91,0.1)",
+                border: "1px solid rgba(242,193,91,0.5)",
+                color: "#F2C15B",
+                borderRadius: 12,
+                cursor: "pointer",
+                fontFamily: "'Poppins', sans-serif",
+                transition: "background 0.2s, border-color 0.2s",
+              }}
+              onMouseEnter={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  "rgba(242,193,91,0.18)";
+                (e.currentTarget as HTMLButtonElement).style.borderColor =
+                  "rgba(242,193,91,0.8)";
+              }}
+              onMouseLeave={(e) => {
+                (e.currentTarget as HTMLButtonElement).style.background =
+                  "rgba(242,193,91,0.1)";
+                (e.currentTarget as HTMLButtonElement).style.borderColor =
+                  "rgba(242,193,91,0.5)";
+              }}
+            >
+              ⬇ Download Receipt
+            </button>
+
+            {/* Back to Home Button */}
+            <button
+              type="button"
+              className="cta-button"
+              onClick={goHome}
+              data-ocid="order.primary_button"
+              style={{ width: "100%", fontSize: "1rem", padding: "14px 32px" }}
+            >
+              ← Back to Home
+            </button>
+          </div>
         </motion.div>
       </div>
     );
   }
 
+  // ── Order Form ──
   return (
     <div
       style={{
@@ -499,22 +988,8 @@ export default function OrderPage() {
       }}
     >
       <style>{`
-        .combo-img {
-          width: 80px;
-          height: 60px;
-          border-radius: 10px;
-          object-fit: cover;
-          flex-shrink: 0;
-          margin-right: 0.85rem;
-          box-shadow: 0 0 12px rgba(0,0,0,0.5);
-          border: 1px solid rgba(226,154,58,0.2);
-        }
-        @media (max-width: 480px) {
-          .combo-img {
-            width: 60px;
-            height: 48px;
-          }
-        }
+        .combo-img { width: 80px; height: 60px; border-radius: 10px; object-fit: cover; flex-shrink: 0; margin-right: 0.85rem; box-shadow: 0 0 12px rgba(0,0,0,0.5); border: 1px solid rgba(226,154,58,0.2); }
+        @media (max-width: 480px) { .combo-img { width: 60px; height: 48px; } }
       `}</style>
       <button
         type="button"
@@ -578,7 +1053,7 @@ export default function OrderPage() {
           </p>
         </motion.div>
 
-        {/* ── Individual Items ── */}
+        {/* Individual Items */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -724,7 +1199,7 @@ export default function OrderPage() {
           </div>
         </motion.div>
 
-        {/* ── Combo Deals Section ── */}
+        {/* Combo Deals */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -748,7 +1223,6 @@ export default function OrderPage() {
               Best value picks – save more, enjoy more
             </p>
           </div>
-
           <div
             style={{ display: "flex", flexDirection: "column", gap: "0.85rem" }}
             data-ocid="order.combo_list"
@@ -758,7 +1232,6 @@ export default function OrderPage() {
               const selected = qty > 0;
               const badgeStyle = getBadgeStyle(combo.badge);
               const isHighlighted = combo.highlight;
-
               return (
                 <motion.div
                   key={combo.id}
@@ -770,13 +1243,7 @@ export default function OrderPage() {
                     background: isHighlighted
                       ? "linear-gradient(135deg, #1e1810 0%, #201a0e 100%)"
                       : "#1a1510",
-                    border: `1px solid ${
-                      selected
-                        ? "rgba(242,193,91,0.75)"
-                        : isHighlighted
-                          ? "rgba(242,193,91,0.4)"
-                          : "rgba(226,154,58,0.25)"
-                    }`,
+                    border: `1px solid ${selected ? "rgba(242,193,91,0.75)" : isHighlighted ? "rgba(242,193,91,0.4)" : "rgba(226,154,58,0.25)"}`,
                     borderRadius: 16,
                     padding: "1rem 1.25rem",
                     display: "flex",
@@ -797,7 +1264,6 @@ export default function OrderPage() {
                     alt={combo.name}
                     className="combo-img"
                   />
-
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{
@@ -854,7 +1320,6 @@ export default function OrderPage() {
                       </span>
                     </div>
                   </div>
-
                   <div
                     style={{
                       display: "flex",
@@ -960,6 +1425,7 @@ export default function OrderPage() {
           )}
         </AnimatePresence>
 
+        {/* Your Details */}
         <motion.div
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -1064,12 +1530,12 @@ export default function OrderPage() {
           <button
             type="button"
             className="cta-button"
-            disabled={!canSubmit}
-            onClick={handleConfirm}
+            disabled={!canProceed}
+            onClick={handleProceedToPayment}
             data-ocid="order.submit_button"
             style={{
-              opacity: canSubmit ? 1 : 0.4,
-              cursor: canSubmit ? "pointer" : "not-allowed",
+              opacity: canProceed ? 1 : 0.4,
+              cursor: canProceed ? "pointer" : "not-allowed",
               fontSize: "1rem",
               padding: "14px 32px",
               display: "inline-flex",
@@ -1077,26 +1543,9 @@ export default function OrderPage() {
               gap: "0.5rem",
             }}
           >
-            {loading ? (
-              <>
-                <span
-                  style={{
-                    display: "inline-block",
-                    width: 16,
-                    height: 16,
-                    border: "2px solid rgba(255,255,255,0.3)",
-                    borderTopColor: "#fff",
-                    borderRadius: "50%",
-                    animation: "spin 0.7s linear infinite",
-                  }}
-                />
-                Placing Order...
-              </>
-            ) : (
-              <>🔥 Confirm Pre-Order · ₹{total || "0"}</>
-            )}
+            💳 Proceed to Payment · ₹{total || "0"}
           </button>
-          {!canSubmit && !loading && (
+          {!canProceed && (
             <p
               style={{
                 color: "#6B6460",
