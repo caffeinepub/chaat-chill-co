@@ -1,5 +1,5 @@
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useActor } from "./hooks/useActor";
 
 const PRICES: Record<string, number> = {
@@ -13,8 +13,8 @@ const PRICES: Record<string, number> = {
   "Chill & Thrill Combo": 89,
   "Premium Indulgence": 105,
   "⭐ Full Feast": 99,
-  "👑 Ultimate Combo": 95,
-  "🧃 Beverage Blast": 139,
+  "👑 Ultimate Combo": 139,
+  "🧃 Beverage Blast": 95,
 };
 
 interface Order {
@@ -92,23 +92,61 @@ export default function AdminPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [retryCount, setRetryCount] = useState(0);
+
+  const retry = useCallback(() => {
+    setError(null);
+    setLoading(true);
+    setRetryCount((c) => c + 1);
+  }, []);
 
   useEffect(() => {
-    if (!actor || isFetching) return;
+    // Still waiting for actor to initialise
+    if (isFetching) return;
+
+    if (!actor) {
+      // Actor unavailable after initialisation — show error with retry
+      setError(
+        "Could not connect to server. Please check your connection and try again.",
+      );
+      setLoading(false);
+      return;
+    }
+
+    void retryCount; // trigger re-fetch on retry
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+
     actor
       .getAllOrders()
       .then((data) => {
-        const sorted = [...data].sort((a, b) =>
-          Number(b.timestamp - a.timestamp),
-        );
+        if (cancelled) return;
+        const sorted = [...data].sort((a, b) => {
+          // Safe bigint comparison
+          if (b.timestamp > a.timestamp) return 1;
+          if (b.timestamp < a.timestamp) return -1;
+          return 0;
+        });
         setOrders(sorted as Order[]);
         setLoading(false);
       })
-      .catch(() => {
-        setError("Failed to load orders.");
+      .catch((err) => {
+        if (cancelled) return;
+        console.error("[AdminPage] Failed to load orders:", err);
+        setError(
+          "Could not connect to server. Please check your connection and try again.",
+        );
         setLoading(false);
       });
-  }, [actor, isFetching]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [actor, isFetching, retryCount]);
+
+  // Determine if we're still waiting for the actor to become available
+  const isInitialising = isFetching || (loading && !actor);
 
   return (
     <div
@@ -207,6 +245,7 @@ export default function AdminPage() {
             data-ocid="admin.loading_state"
             style={{
               display: "flex",
+              flexDirection: "column",
               alignItems: "center",
               justifyContent: "center",
               gap: "1rem",
@@ -225,7 +264,7 @@ export default function AdminPage() {
                 animation: "spin 0.7s linear infinite",
               }}
             />
-            Loading orders...
+            {isInitialising ? "Connecting to server…" : "Loading orders…"}
           </div>
         )}
 
@@ -236,13 +275,34 @@ export default function AdminPage() {
               background: "rgba(220,60,60,0.12)",
               border: "1px solid rgba(220,60,60,0.4)",
               borderRadius: 12,
-              padding: "1.5rem",
+              padding: "1.5rem 2rem",
               color: "#E88",
               textAlign: "center",
               marginTop: "2rem",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "1rem",
             }}
           >
-            {error}
+            <span>{error}</span>
+            <button
+              type="button"
+              onClick={retry}
+              data-ocid="admin.button"
+              style={{
+                background: "linear-gradient(135deg, #D8842F, #F2C15B)",
+                border: "none",
+                borderRadius: 50,
+                color: "#0B0A08",
+                fontSize: "0.85rem",
+                fontWeight: 700,
+                padding: "8px 22px",
+                cursor: "pointer",
+              }}
+            >
+              🔄 Retry
+            </button>
           </div>
         )}
 

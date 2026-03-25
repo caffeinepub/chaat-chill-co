@@ -2,6 +2,9 @@ import { AnimatePresence, motion } from "motion/react";
 import { useState } from "react";
 import { useActor } from "./hooks/useActor";
 
+const QR_IMAGE =
+  "/assets/uploads/paymentqr_page-0001_1-019d2431-c276-737f-b015-5e9afebb4a09-2.jpg";
+
 const ORDER_ITEMS = [
   {
     id: 1,
@@ -95,7 +98,7 @@ const COMBO_ITEMS: {
     id: 107,
     name: "👑 Ultimate Combo",
     emoji: "",
-    price: 95,
+    price: 139,
     sub: "Pani Puri + Dahi Puri + Cold Coffee",
     badge: "Premium",
     highlight: false,
@@ -105,7 +108,7 @@ const COMBO_ITEMS: {
     id: 108,
     name: "🧃 Beverage Blast",
     emoji: "",
-    price: 139,
+    price: 95,
     sub: "Cold Coffee + Iced Tea",
     badge: "New",
     highlight: true,
@@ -145,10 +148,12 @@ export default function OrderPage() {
   const [quantities, setQuantities] = useState<Record<number, number>>({});
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
-  const [confirmed, setConfirmed] = useState(false);
+  const [step, setStep] = useState<"form" | "payment" | "done">("form");
   const [offlineMode, setOfflineMode] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [orderTotal, setOrderTotal] = useState(0);
+  const [orderName, setOrderName] = useState("");
 
   const allItems = [...ORDER_ITEMS, ...COMBO_ITEMS];
 
@@ -198,7 +203,6 @@ export default function OrderPage() {
       ),
     );
 
-    // Try backend first
     if (actor) {
       try {
         const result = await actor.placeOrder(
@@ -207,28 +211,196 @@ export default function OrderPage() {
           payload.items,
         );
         console.log("[Order] Backend response:", result?.toString());
-        setConfirmed(true);
+        setOrderTotal(total);
+        setOrderName(name.trim());
+        setStep("payment");
         setLoading(false);
         return;
       } catch (err: unknown) {
         console.error("[Order] Backend error:", err);
-        // Fall through to offline mode below
         console.warn("[Order] Falling back to offline mode. Data:", payload);
         setOfflineMode(true);
-        setConfirmed(true);
+        setOrderTotal(total);
+        setOrderName(name.trim());
+        setStep("payment");
         setLoading(false);
         return;
       }
     }
 
-    // No actor available — offline fallback
     console.warn("[Order] Actor not available. Offline mode. Data:", payload);
     setOfflineMode(true);
-    setConfirmed(true);
+    setOrderTotal(total);
+    setOrderName(name.trim());
+    setStep("payment");
     setLoading(false);
   }
 
-  if (confirmed) {
+  // ── Payment Screen ──
+  if (step === "payment") {
+    return (
+      <div
+        style={{
+          background: "#0B0A08",
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          fontFamily: "'Poppins', sans-serif",
+          padding: "2rem 1.25rem",
+        }}
+      >
+        <motion.div
+          initial={{ opacity: 0, y: 30 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.6, ease: "easeOut" }}
+          style={{
+            background: "#1a1510",
+            border: "1px solid rgba(242,193,91,0.35)",
+            borderRadius: 24,
+            padding: "2.5rem 2rem",
+            maxWidth: 420,
+            width: "100%",
+            textAlign: "center",
+            boxShadow: "0 0 60px rgba(242,193,91,0.12)",
+          }}
+        >
+          <h2
+            style={{
+              fontSize: "1.6rem",
+              fontWeight: 900,
+              color: "#F3F1ED",
+              marginBottom: "0.4rem",
+              letterSpacing: "0.02em",
+            }}
+          >
+            Complete Your Payment
+          </h2>
+          <p
+            style={{
+              color: "#B9B3AA",
+              fontSize: "0.9rem",
+              marginBottom: "1.5rem",
+            }}
+          >
+            Scan the QR code below to confirm your order
+          </p>
+
+          {/* Amount */}
+          <div
+            style={{
+              background: "rgba(242,193,91,0.1)",
+              border: "1px solid rgba(242,193,91,0.4)",
+              borderRadius: 12,
+              padding: "0.75rem 1.5rem",
+              marginBottom: "1.75rem",
+              display: "inline-block",
+            }}
+          >
+            <span
+              style={{
+                fontSize: "1.6rem",
+                fontWeight: 900,
+                background: "linear-gradient(90deg, #E29A3A, #F2C15B)",
+                WebkitBackgroundClip: "text",
+                WebkitTextFillColor: "transparent",
+              }}
+            >
+              Pay ₹{orderTotal}
+            </span>
+          </div>
+
+          {/* QR Code */}
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "center",
+              marginBottom: "1.5rem",
+            }}
+          >
+            <img
+              src={QR_IMAGE}
+              alt="UPI QR Code"
+              style={{
+                width: 220,
+                height: 220,
+                objectFit: "contain",
+                borderRadius: 16,
+                boxShadow:
+                  "0 0 32px rgba(242,193,91,0.25), 0 4px 24px rgba(0,0,0,0.5)",
+                border: "1px solid rgba(242,193,91,0.2)",
+                background: "#fff",
+                padding: 8,
+              }}
+            />
+          </div>
+
+          {/* Instructions */}
+          <div
+            style={{
+              background: "rgba(226,154,58,0.08)",
+              border: "1px solid rgba(226,154,58,0.2)",
+              borderRadius: 12,
+              padding: "1rem 1.25rem",
+              marginBottom: "1.75rem",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.5rem",
+            }}
+          >
+            <p
+              style={{
+                color: "#E29A3A",
+                fontSize: "0.85rem",
+                margin: 0,
+                fontWeight: 600,
+              }}
+            >
+              Pay using any UPI app (GPay, PhonePe, Paytm)
+            </p>
+            <p style={{ color: "#B9B3AA", fontSize: "0.82rem", margin: 0 }}>
+              Orders will be confirmed only after payment
+            </p>
+            <p style={{ color: "#B9B3AA", fontSize: "0.82rem", margin: 0 }}>
+              Show payment screenshot at the stall
+            </p>
+          </div>
+
+          {/* I've Paid button */}
+          {step === "payment" && (
+            <button
+              type="button"
+              className="cta-button"
+              onClick={() => setStep("done")}
+              style={{
+                fontSize: "1rem",
+                padding: "14px 32px",
+                width: "100%",
+              }}
+            >
+              ✅ I've Paid
+            </button>
+          )}
+
+          {offlineMode && (
+            <p
+              style={{
+                color: "#E29A3A",
+                fontSize: "0.75rem",
+                marginTop: "0.75rem",
+                opacity: 0.7,
+              }}
+            >
+              (offline mode — saved locally)
+            </p>
+          )}
+        </motion.div>
+      </div>
+    );
+  }
+
+  // ── Done / Confirmed Screen ──
+  if (step === "done") {
     return (
       <div
         style={{
@@ -257,7 +429,7 @@ export default function OrderPage() {
           }}
           data-ocid="order.success_state"
         >
-          <div style={{ fontSize: "4rem", marginBottom: "1rem" }}>🔥</div>
+          <div style={{ fontSize: "4rem", marginBottom: "1rem" }}>🎉</div>
           <h2
             style={{
               fontSize: "2rem",
@@ -266,20 +438,8 @@ export default function OrderPage() {
               marginBottom: "0.5rem",
             }}
           >
-            {offlineMode ? "Order Received!" : "Order Confirmed!"}
+            Payment noted! Your order is confirmed 🎉
           </h2>
-          {offlineMode && (
-            <p
-              style={{
-                color: "#E29A3A",
-                fontSize: "0.8rem",
-                marginBottom: "0.25rem",
-                opacity: 0.8,
-              }}
-            >
-              (offline mode — saved locally)
-            </p>
-          )}
           <p
             style={{
               color: "#F2C15B",
@@ -287,7 +447,7 @@ export default function OrderPage() {
               marginBottom: "0.5rem",
             }}
           >
-            Hey {name}! 🎉
+            Hey {orderName}!
           </p>
           <p
             style={{
@@ -297,8 +457,10 @@ export default function OrderPage() {
             }}
           >
             Your pre-order of{" "}
-            <span style={{ color: "#F2C15B", fontWeight: 700 }}>₹{total}</span>{" "}
-            is locked in.
+            <span style={{ color: "#F2C15B", fontWeight: 700 }}>
+              ₹{orderTotal}
+            </span>{" "}
+            is locked in. See you at the stall!
           </p>
           <div
             style={{
@@ -312,7 +474,7 @@ export default function OrderPage() {
               fontWeight: 600,
             }}
           >
-            💸 Pay at the stall · No advance needed
+            📸 Show payment screenshot at the stall
           </div>
           <button
             type="button"
@@ -630,14 +792,12 @@ export default function OrderPage() {
                     overflow: "hidden",
                   }}
                 >
-                  {/* Combo image on the LEFT */}
                   <img
                     src={combo.image}
                     alt={combo.name}
                     className="combo-img"
                   />
 
-                  {/* Text info in the MIDDLE */}
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div
                       style={{
@@ -695,7 +855,6 @@ export default function OrderPage() {
                     </div>
                   </div>
 
-                  {/* Quantity controls on the RIGHT */}
                   <div
                     style={{
                       display: "flex",
